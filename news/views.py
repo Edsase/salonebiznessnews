@@ -16,16 +16,20 @@ from django.shortcuts import redirect
 
 import datetime
 
-from models import Feed, Article, User, UserProfile
+from models import Feed, Article
 #from forms import CategoryForm, PageForm, UserForm, UserProfileForm
 
-
-#import articles from news paper...check out  https://github.com/codelucas/newspaper
-#from newspaper import Article as NewsArticle
 #import feed parser
 import feedparser
 #import dateutil parser
 from dateutil import parser
+#from django.utils import timezone
+import pytz
+
+
+
+#import articles from news paper...check out  https://github.com/codelucas/newspaper
+#from newspaper import Article as NewsArticle
 
 
 
@@ -39,9 +43,9 @@ def index(request):
     #query the database for list of all stored articles
     #order the queryset by publication date
     #retrieve only the top 5 most recent articles
-    most_recent_articles = Article.objects.all().order_by('-publication_date')[:5]
+    most_recent_articles = Article.objects.all().order_by('-publication_date')[:10]
     #retrieve only the top 5 most viewed articles
-    most_viewed_articles = Article.objects.all().order_by('-views')[:5]
+    most_viewed_articles = Article.objects.all().order_by('-views')[:10]
     #retrieve all articles
     all_articles = Article.objects.all().order_by('-publication_date')
     #populate context_dictionary
@@ -59,7 +63,7 @@ def show_feed(request, feed_name_slug):
     #create context dictionary for template rendering
     context_dict = {}
     #get the requested category based on the slug name if it exists
-    
+
     try:
         feed = Feed.objects.get(slug = feed_name_slug)
         #get the articles associated with this category
@@ -67,7 +71,7 @@ def show_feed(request, feed_name_slug):
         #update the context_dict
         context_dict ['feed'] =feed
         context_dict ['articles'] = articles
-    #abouve will raise a feed does not exist exception 
+    #abouve will raise a feed does not exist exception
     except Feed.DoesNotExist:
         #update context dict with none
         context_dict['feed'] = None
@@ -150,7 +154,7 @@ def show_feed(request, feed_name_slug):
 #    #        print profile_form.errors, user_form.errors
 
 #    ##display the forms to the user
-#    #else: 
+#    #else:
 #    #    user_form = UserForm()
 #    #    profile_form = UserProfileForm()
 
@@ -214,9 +218,9 @@ def show_feed(request, feed_name_slug):
 ##    #if the cookie does not exists, return 1
 ##    visits = int(request.COOKIES.get('visits', 1)) #cookie that counts the number of visits to our site...all cookies are returned as strings
 ##    #get the cookie that tracks the last time of visit from the request
-##    last_visit_cookie = request.COOKIES.get('last_visit', str(datetime.now())) 
+##    last_visit_cookie = request.COOKIES.get('last_visit', str(datetime.now()))
 ##    #strip the last visit cookie to get out the time of visit
-##    last_visit_time = datetime.strptime(last_visit_cookie[:-7], '%Y-%m-%d %H:%M:%S') 
+##    last_visit_time = datetime.strptime(last_visit_cookie[:-7], '%Y-%m-%d %H:%M:%S')
 ##    #check last visit time if it is more than one day old
 ##    if (datetime.now()-last_visit_time).days>1:
 ##        #increase the visits counter cookie
@@ -251,7 +255,7 @@ def show_feed(request, feed_name_slug):
 #    #get the server side cookie that tracks the last time of visit from the request
 #    last_visit_cookie = get_server_side_cookie(request, 'last_visit', str(datetime.now()))
 #    #strip the last visit cookie to get out the time of visit
-#    last_visit_time = datetime.strptime(last_visit_cookie[:], '%Y-%m-%d %H:%M:%S.%f') 
+#    last_visit_time = datetime.strptime(last_visit_cookie[:], '%Y-%m-%d %H:%M:%S.%f')
 #    #check last visit time if it is more than one day old--changed to seconds for testing
 #    if (datetime.now()-last_visit_time).seconds>1:
 #        #increase the visits counter cookie
@@ -263,10 +267,10 @@ def show_feed(request, feed_name_slug):
 #        #set the last visit cookie
 #        #use the request.session dictionary to update
 #        request.session['last_visit'] = last_visit_cookie
-    
+
 #    #update and set the visit cookie
 #    request.session['visits'] = visits
-  
+
 def track_article_url(request):
     """
     function that counts the number of times an article is clicked
@@ -286,4 +290,70 @@ def track_article_url(request):
             except:
                 pass
 
-    return redirect(url)  
+    return redirect(url)
+
+
+def update_articles(request):
+
+    """
+        - function for adding news articles from feeds in the database
+        - its a cron job that runs every hour
+        -it loops through all the feeds in the db
+        - parses the feeds to extract the articles
+        - updates the articles model
+        - does not return anything
+    """
+    all_feeds = Feed.objects.all()
+    for feed in all_feeds:
+    #parse the feed
+        feed_data = feedparser.parse(feed.url)
+        #extract the articles in feed_data
+        for entry in feed_data.entries:
+
+            #make an article ojbject
+            article = Article()
+            #assign the entry url to the article url
+            article.url = entry.link
+            #check if url already exist in db. If not yet exist, continue assigning and save entry
+            #get the existing articles in the db
+            existing_articles = Article.objects.filter(url = article.url)
+            if len(existing_articles)==0: #then entry does not already exist in db
+                article.title = entry.title
+                #article.description = entry.description[:20]
+                #dont store description
+                article.description = ""
+                #get the publication date of the article
+
+                try:
+                    d = datetime.datetime(entry.published_parsed[0:6])
+                except TypeError:
+                    #error due to no tzoneinfo
+                    #so make the date timezone aware
+                    pub_date = entry.published
+                    d = parser.parse(pub_date)
+                    #add tzone info if d does not have already
+                    if '+' not in pub_date:
+                        gmt = pytz.timezone('GMT')
+                        d = gmt.localize(d)
+                    #change date to datestring
+                    gmt = pytz.timezone('GMT')
+                    today = gmt.localize(datetime.datetime.today())
+
+                    #check if article is less than three days old
+                    if (today-d).days<3:
+                        #since article is less than 2 days, extract and save it into db
+                        article.publication_date = d
+                        article.feed = feed
+                        #article.category=Category()
+                        article.save()
+    five_days_ago = datetime.datetime.now()-datetime.timedelta(days=10)
+    gmt = pytz.timezone('GMT')
+    five_days_ago = gmt.localize(five_days_ago)
+    #delete all the articles in the db older than five days
+    Article.objects.filter(publication_date__lte=five_days_ago).delete()
+    context_dict = {"owner": "salonebizness community", "date": datetime.datetime.today()}
+    return render(request, 'news/about.html', context=context_dict)
+
+
+
+
