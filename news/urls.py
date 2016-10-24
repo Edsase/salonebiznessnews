@@ -16,5 +16,7 @@ urlpatterns = [
     #url(r'logout/$', views.user_logout, name='logout'),
     #url for counting the number of clicks on article urls
     url(r'^goto/$', views.track_article_url, name='goto'),
+    url(r'^goto/$', views.track_article_url, name='goto'),
+    url(r'^updatearticles/$', views.update_articles),
 
     ]
